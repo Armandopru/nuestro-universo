@@ -64,7 +64,7 @@ function displayMember(memberId: string, currentUserId: string) {
     return "Nando";
   }
 
-  if (memberId === "e4038101-c225-492e-9380-023f653af5a5") {
+  if (memberId === "7acb0e6b-2bcb-4ac7-8353-65cfd63185a6") {
     return "Mari";
   }
 
