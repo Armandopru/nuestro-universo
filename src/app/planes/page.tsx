@@ -12,6 +12,8 @@ import {
   ChevronRight,
   Clock3,
   ExternalLink,
+  Download,
+  Eye,
   Heart,
   ImagePlus,
   LoaderCircle,
@@ -164,6 +166,9 @@ export default function PlanesPage() {
   const [form, setForm] = useState<PlanForm>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [filter, setFilter] = useState<PlanFilter>("todos");
+  const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const PLANS_PER_PAGE = 10;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -766,6 +771,134 @@ export default function PlanesPage() {
       ? plans
       : plans.filter((plan) => normalizeStatus(plan.status) === filter);
 
+  const totalPages = Math.max(1, Math.ceil(filteredPlans.length / PLANS_PER_PAGE));
+  const paginatedPlans = filteredPlans.slice(
+    (currentPage - 1) * PLANS_PER_PAGE,
+    currentPage * PLANS_PER_PAGE
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filter]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
+  function downloadPlanAsPng(plan: Plan) {
+    try {
+      const canvas = document.createElement("canvas");
+      const width = 1200;
+      const padding = 80;
+      const contentWidth = width - padding * 2;
+      const lineHeight = 38;
+      const titleFont = "bold 48px Arial";
+      const bodyFont = "28px Arial";
+      const lines: string[] = [];
+      const addWrapped = (label: string, value: string) => {
+        const text = `${label}: ${value}`;
+        const words = text.split(/\s+/);
+        let line = "";
+        for (const word of words) {
+          const candidate = line ? `${line} ${word}` : word;
+          if (candidate.length > 55 && line) {
+            lines.push(line);
+            line = word;
+          } else {
+            line = candidate;
+          }
+        }
+        if (line) lines.push(line);
+        lines.push("");
+      };
+
+      addWrapped("Categoría", plan.category || "Otro");
+      addWrapped("Estado", statusLabels[normalizeStatus(plan.status)]);
+      addWrapped("Fecha", formatDate(plan.planned_at));
+      if (plan.planned_at) addWrapped("Hora", formatTime(plan.planned_at));
+      if (plan.location) addWrapped("Lugar", plan.location);
+      addWrapped("Presupuesto", formatMoney(plan.budget));
+      if (plan.map_url) addWrapped("Mapa", plan.map_url);
+      addWrapped("Descripción", plan.description || "Sin descripción");
+
+      canvas.width = width;
+      canvas.height = Math.max(620, 330 + lines.length * lineHeight);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("No se pudo preparar la imagen.");
+
+      const gradient = ctx.createLinearGradient(0, 0, width, canvas.height);
+      gradient.addColorStop(0, "#17101f");
+      gradient.addColorStop(1, "#25112b");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, width, canvas.height);
+
+      ctx.strokeStyle = "rgba(244,114,182,0.65)";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(28, 28, width - 56, canvas.height - 56);
+
+      ctx.fillStyle = "#f9a8d4";
+      ctx.font = "bold 22px Arial";
+      ctx.fillText("NUESTRO UNIVERSO ♥", padding, 90);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = titleFont;
+      const titleWords = plan.title.split(/\s+/);
+      let titleLine = "";
+      let titleY = 165;
+      for (const word of titleWords) {
+        const candidate = titleLine ? `${titleLine} ${word}` : word;
+        if (ctx.measureText(candidate).width > contentWidth && titleLine) {
+          ctx.fillText(titleLine, padding, titleY);
+          titleY += 58;
+          titleLine = word;
+        } else {
+          titleLine = candidate;
+        }
+      }
+      if (titleLine) ctx.fillText(titleLine, padding, titleY);
+
+      ctx.strokeStyle = "rgba(255,255,255,0.18)";
+      ctx.beginPath();
+      ctx.moveTo(padding, titleY + 35);
+      ctx.lineTo(width - padding, titleY + 35);
+      ctx.stroke();
+
+      ctx.font = bodyFont;
+      ctx.fillStyle = "#f3e8ff";
+      let y = titleY + 95;
+      for (const line of lines) {
+        if (!line) {
+          y += 10;
+          continue;
+        }
+        ctx.fillText(line, padding, y, contentWidth);
+        y += lineHeight;
+      }
+
+      ctx.fillStyle = "#f9a8d4";
+      ctx.font = "italic 22px Arial";
+      ctx.fillText("Una historia más para escribir juntos ❤️", padding, canvas.height - 55);
+
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          setErrorMessage("No se pudo crear la imagen descargable.");
+          return;
+        }
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${plan.title.trim().replace(/[^a-z0-9áéíóúñ_-]+/gi, "-") || "plan"}.png`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      }, "image/png");
+    } catch (error) {
+      console.error("Error generando imagen del plan:", error);
+      setErrorMessage("No fue posible generar la imagen del plan.");
+    }
+  }
+
   const counts: Record<PlanFilter, number> = {
     todos: plans.length,
     pendiente: plans.filter(
@@ -1244,7 +1377,7 @@ export default function PlanesPage() {
               <button
                 key={value}
                 type="button"
-                onClick={() => setFilter(value)}
+                onClick={() => { setFilter(value); setCurrentPage(1); }}
                 className={`rounded-full border px-4 py-2 text-sm transition ${
                   filter === value
                     ? "border-pink-400/40 bg-pink-500/15 text-pink-200"
@@ -1287,7 +1420,7 @@ export default function PlanesPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              {filteredPlans.map((plan) => {
+              {paginatedPlans.map((plan) => {
                 const status = normalizeStatus(plan.status);
                 const planPhotos = photosByPlan[plan.id] ?? [];
                 const activePhotoIndex = activePhotoByPlan[plan.id] ?? 0;
@@ -1453,6 +1586,14 @@ export default function PlanesPage() {
                       <div className="mt-5 flex flex-wrap gap-2 border-t border-white/[0.07] pt-4">
                         <button
                           type="button"
+                          onClick={() => setSelectedPlan(plan)}
+                          className="inline-flex items-center gap-2 rounded-xl border border-pink-400/20 bg-pink-500/10 px-3 py-2 text-sm text-pink-200 transition hover:bg-pink-500/20"
+                        >
+                          <Eye className="h-4 w-4" />
+                          Ver plan
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => openEditForm(plan)}
                           className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm text-gray-300 transition hover:bg-white/5"
                         >
@@ -1480,7 +1621,166 @@ export default function PlanesPage() {
               })}
             </div>
           )}
+
+          {filteredPlans.length > 0 && (
+            <div className="mt-6 flex flex-col items-center justify-between gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4 sm:flex-row">
+              <p className="text-sm text-gray-400">
+                Mostrando {(currentPage - 1) * PLANS_PER_PAGE + 1}–{Math.min(currentPage * PLANS_PER_PAGE, filteredPlans.length)} de {filteredPlans.length} planes
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                  disabled={currentPage === 1}
+                  className="inline-flex items-center gap-1 rounded-xl border border-white/10 px-3 py-2 text-sm text-gray-300 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Anterior
+                </button>
+                <span className="min-w-24 text-center text-sm text-gray-300">
+                  Página {currentPage} de {totalPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                  disabled={currentPage === totalPages}
+                  className="inline-flex items-center gap-1 rounded-xl border border-white/10 px-3 py-2 text-sm text-gray-300 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Siguiente
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </section>
+
+        {selectedPlan && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3 backdrop-blur-sm sm:p-6"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setSelectedPlan(null);
+            }}
+          >
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="plan-detail-title"
+              className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-3xl border border-pink-400/20 bg-[#15121b] shadow-2xl shadow-black/50"
+            >
+              <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-[#15121b]/95 px-5 py-4 backdrop-blur sm:px-7">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-pink-300">Nuestro universo</p>
+                  <h2 id="plan-detail-title" className="mt-1 text-lg font-bold sm:text-xl">Detalles del plan</h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPlan(null)}
+                  aria-label="Cerrar detalles"
+                  className="rounded-xl border border-white/10 p-2 text-gray-300 transition hover:bg-white/5"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="space-y-6 p-5 sm:p-7">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <span className="inline-flex rounded-full border border-purple-400/20 bg-purple-400/10 px-3 py-1 text-xs text-purple-200">
+                      {selectedPlan.category || "Otro"}
+                    </span>
+                    <h3 className="mt-3 break-words text-2xl font-bold sm:text-3xl">{selectedPlan.title}</h3>
+                  </div>
+                  <span className={`rounded-full border px-3 py-1.5 text-sm ${statusStyles[normalizeStatus(selectedPlan.status)]}`}>
+                    {statusLabels[normalizeStatus(selectedPlan.status)]}
+                  </span>
+                </div>
+
+                {photosByPlan[selectedPlan.id]?.length > 0 && (
+                  <div>
+                    <h4 className="mb-3 font-semibold text-white">Fotografías del plan</h4>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {(photosByPlan[selectedPlan.id] ?? []).map((photo, index) => (
+                        <div key={photo.id} className="overflow-hidden rounded-2xl border border-white/10 bg-black/20">
+                          <img src={photo.signedUrl} alt={`Fotografía ${index + 1} de ${selectedPlan.title}`} className="max-h-80 w-full object-contain" />
+                          <div className="p-3">
+                            <a
+                              href={photo.signedUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              download={`foto-${index + 1}-${selectedPlan.title.replace(/[^a-z0-9áéíóúñ_-]+/gi, "-")}`}
+                              className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-pink-200 transition hover:bg-white/5"
+                            >
+                              <Download className="h-4 w-4" />
+                              Abrir / descargar foto
+                            </a>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4">
+                    <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">Fecha</p>
+                    <p className="flex items-center gap-2 text-gray-200"><CalendarDays className="h-4 w-4 text-pink-300" />{formatDate(selectedPlan.planned_at)}</p>
+                  </div>
+                  {selectedPlan.planned_at && (
+                    <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4">
+                      <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">Hora</p>
+                      <p className="flex items-center gap-2 text-gray-200"><Clock3 className="h-4 w-4 text-pink-300" />{formatTime(selectedPlan.planned_at)}</p>
+                    </div>
+                  )}
+                  {selectedPlan.location && (
+                    <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4">
+                      <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">Lugar</p>
+                      <p className="flex items-start gap-2 break-words text-gray-200"><MapPin className="mt-1 h-4 w-4 shrink-0 text-pink-300" />{selectedPlan.location}</p>
+                    </div>
+                  )}
+                  <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4">
+                    <p className="mb-1 text-xs uppercase tracking-wide text-gray-500">Presupuesto</p>
+                    <p className="flex items-center gap-2 text-gray-200"><Wallet className="h-4 w-4 text-pink-300" />{formatMoney(selectedPlan.budget)}</p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4 sm:p-5">
+                  <h4 className="mb-2 font-semibold">Descripción y detalles</h4>
+                  <p className="whitespace-pre-wrap break-words text-sm leading-7 text-gray-300">
+                    {selectedPlan.description || "Este plan todavía no tiene una descripción."}
+                  </p>
+                </div>
+
+                {selectedPlan.map_url && (
+                  <a href={selectedPlan.map_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-pink-300 transition hover:text-pink-200">
+                    <MapPin className="h-4 w-4" />Ver ubicación en Google Maps<ExternalLink className="h-4 w-4" />
+                  </a>
+                )}
+
+                <div className="flex flex-wrap gap-2 border-t border-white/10 pt-5">
+                  <button
+                    type="button"
+                    onClick={() => downloadPlanAsPng(selectedPlan)}
+                    className="inline-flex items-center gap-2 rounded-xl bg-pink-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-pink-400"
+                  >
+                    <Download className="h-4 w-4" />Descargar plan como PNG
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const plan = selectedPlan;
+                      setSelectedPlan(null);
+                      openEditForm(plan);
+                    }}
+                    className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2.5 text-sm text-gray-300 transition hover:bg-white/5"
+                  >
+                    <Pencil className="h-4 w-4" />Editar plan
+                  </button>
+                </div>
+              </div>
+            </section>
+          </div>
+        )}
 
         <footer className="mt-12 pb-4 text-center text-xs text-gray-600">
           Hecho con cariño para ustedes dos ❤️
